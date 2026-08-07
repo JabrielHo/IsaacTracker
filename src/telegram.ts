@@ -7,6 +7,7 @@ export async function sendMessage(token: string, chatId: string, text: string): 
       text,
       parse_mode: "HTML",
       disable_web_page_preview: true,
+      disable_notification: true,
     }),
   });
 
