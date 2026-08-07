@@ -1,0 +1,38 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tft-tracker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-01",
+
+  // Every minute. Free plan allows 1-minute granularity.
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
+
+  // Run `npx wrangler kv namespace create TRACKER` and paste the id it prints.
+  "kv_namespaces": [
+    {
+      "binding": "TRACKER",
+      "id": "6ef3bfd3a90c47bc8641364a585d4344"
+    }
+  ],
+
+  "vars": {
+    "RIOT_PLATFORM": "sg2",
+    "PLAYERS": "audioizzzaac#98k",
+    "ANNOUNCE_GAME_START": "true",
+
+    // Which ranked ladder to report LP from: "solo" or "double_up".
+    // These are separate ranks — solo Emerald and Double Up Master can coexist.
+    "TRACK_QUEUE": "double_up"
+  },
+
+  "observability": {
+    "enabled": true
+  }
+
+  // Secrets are NOT stored here. Set them with:
+  //   npx wrangler secret put RIOT_API_KEY
+  //   npx wrangler secret put TELEGRAM_BOT_TOKEN
+  //   npx wrangler secret put TELEGRAM_CHAT_ID
+}

@@ -1,0 +1,6 @@
+# Local-only secrets for `wrangler dev`. Copy to ".dev.vars" (gitignored).
+# In production these live in Cloudflare via `wrangler secret put`, not here.
+
+RIOT_API_KEY=RGAPI-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+TELEGRAM_BOT_TOKEN=123456789:AAxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TELEGRAM_CHAT_ID=-1001234567890
