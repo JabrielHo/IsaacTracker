@@ -8,11 +8,11 @@ Tracking `audioizzzaac#98k` on Singapore (`sg2`) by default.
 ## What you get
 
 ```
-🥈 2nd — audioizzzaac#98k
-Diamond II 61 LP (+34 LP)
-🧩 6 Rebel · 4 Sentinel · 2 Marksman
-🎯 ⭐Aphelios, Jinx, Sett
-📊 Lv 9 · round 34 · 3 elims · 35:02
+🥈 2nd — audioizzzaac#98K
+Master 251 LP (+34 LP)
+🧩 6 Duelist · 4 Sorcerer
+🎯 ⭐Yasuo, Ahri
+📊 Lv 9 · round 33 · 2 elims · 36:20
 ```
 
 Plus a `🎮 just queued into a game` ping when a game starts.
@@ -106,6 +106,12 @@ npm run dev
 `wrangler dev` simulates KV locally. Fire the cron handler on demand by visiting
 `http://127.0.0.1:8787/__scheduled` — nothing is written to production.
 
+Type-check without deploying:
+
+```bash
+npm run typecheck
+```
+
 ## Staying inside the free plan
 
 Three separate limits matter, and the code is written around them:
@@ -114,7 +120,7 @@ Three separate limits matter, and the code is written around them:
 |---|---|---|
 | Worker invocations | 100,000/day | 1,440 (once/min) |
 | KV writes | **1,000/day** | only when state changes — tens/day |
-| Riot API | 100 req / 2 min | ~6 |
+| Riot API | 100 req / 2 min | 2–8 |
 | CPU per invocation | 10ms | capped at 2 match fetches/run |
 
 The KV write budget is the tight one: 1,440 cron ticks against a 1,000-write ceiling
@@ -138,6 +144,11 @@ still get measured against the right starting point.
 These are completely separate ranks — someone can be Emerald in solo and Master in
 Double Up at the same time. Games outside the tracked queue still get posted, just with
 the queue name instead of a rank line.
+
+Anything other than those two values is rejected at startup with an error naming the
+valid ones, rather than quietly falling back to solo — a typo here would otherwise
+track the wrong ladder indefinitely. `"double-up"` and `"Double Up"` also work;
+`"doubleup"` does not.
 
 **Changing this requires resetting state.** The stored LP baseline belongs to the old
 ladder, so the first game after a switch would diff against the wrong number and report
