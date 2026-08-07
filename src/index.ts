@@ -135,6 +135,16 @@ async function announceMatches(
 
   for (const matchId of batch) {
     const match = await riot.match(matchId);
+
+    // A remake or aborted lobby is not a result worth posting, but it still has
+    // to be recorded or we would refetch it on every tick forever.
+    const outcome = match.info.endOfGameResult;
+    if (outcome !== undefined && outcome !== "GameComplete") {
+      console.log(`[skip] ${matchId} ended as ${outcome}`);
+      player.seen = [matchId, ...player.seen].slice(0, 25);
+      continue;
+    }
+
     const me = match.info.participants.find((p) => p.puuid === player.puuid);
     if (!me) continue;
 

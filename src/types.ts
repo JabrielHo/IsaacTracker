@@ -34,12 +34,15 @@ export interface Trait {
   name: string;
   num_units: number;
   style?: number;
+  /** Number of breakpoints. Champion-unique traits have exactly 1. */
+  tier_total?: number;
 }
 
 export interface Unit {
   character_id: string;
   tier: number;
   rarity: number;
+  itemNames?: string[];
 }
 
 export interface Participant {
@@ -49,6 +52,12 @@ export interface Participant {
   last_round: number;
   players_eliminated: number;
   time_eliminated?: number;
+  gold_left?: number;
+  total_damage_to_players?: number;
+  /** Double Up only: teammates share this id. */
+  partner_group_id?: number;
+  riotIdGameName?: string;
+  riotIdTagline?: string;
   traits: Trait[];
   units: Unit[];
 }
@@ -58,6 +67,10 @@ export interface MatchInfo {
   /** Riot returns snake_case; some sets have also emitted camelCase. */
   queue_id?: number;
   queueId?: number;
+  /** "GameComplete" for a finished game; anything else is a remake or abort. */
+  endOfGameResult?: string;
+  /** "standard" | "pairs" (Double Up) | "turbo". */
+  tft_game_type?: string;
   participants: Participant[];
 }
 

@@ -8,12 +8,19 @@ Tracking `audioizzzaac#98k` on Singapore (`sg2`) by default.
 ## What you get
 
 ```
-🥈 2nd — audioizzzaac#98K
+🥇 1st of 4 teams — audioizzzaac#98K + jkyz49
 Master 251 LP (+34 LP)
-🧩 6 Duelist · 4 Sorcerer
-🎯 ⭐Yasuo, Ahri
-📊 Lv 9 · round 33 · 2 elims · 36:20
+🧩 2 DRX · 1 Space Groove
+🎯 ⭐Miss Fortune — Deathblade, Deathblade, Guinsoos Rageblade
+    ⭐Maokai — Frozen Heart, Dragons Claw
+    ⭐Urgot — Titans Resolve, Unstable Concoction, Quicksilver
+📊 Lv 7 · round 34 · 56 dmg · 29g left · 33:43
 ```
+
+In Double Up the **team** standing is reported, not the raw 1–8 placement —
+teammates get adjacent numbers, so a raw "2nd" is actually the winning pair's
+other half. Solo games show the plain placement. Remakes and aborted lobbies
+(`endOfGameResult` other than `GameComplete`) are recorded but not posted.
 
 Plus a `🎮 just queued into a game` ping when a game starts.
 

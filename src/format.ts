@@ -31,8 +31,45 @@ const QUEUES: Record<number, string> = {
 
 const PLACEMENT_LABEL = ["🥇 1st", "🥈 2nd", "🥉 3rd", "4th", "5th", "6th", "7th", "8th"];
 
-/** Strips the set prefix Riot puts on every asset id: "TFT14_Aphelios" -> "Aphelios". */
-const stripSet = (id = ""): string => id.replace(/^TFT\d*[a-z]*_/i, "").replaceAll("_", " ");
+/** Medal for the podium, plain ordinal past it. `n` is 1-based. */
+function placementLabel(n: number): string {
+  return PLACEMENT_LABEL[n - 1] ?? `${n}th`;
+}
+
+/** "DarkStar" -> "Dark Star". Leaves acronyms like "DRX" and "ADMIN" alone. */
+const splitCamel = (s: string): string => s.replace(/([a-z])([A-Z])/g, "$1 $2");
+
+/** Strips the set prefix Riot puts on every asset id: "TFT17_Aatrox" -> "Aatrox". */
+const stripSet = (id = ""): string => splitCamel(id.replace(/^TFT\d*[a-z]*_/i, "").replaceAll("_", " "));
+
+/**
+ * Item ids carry their own prefixes and, for artifact/emblem variants, extra
+ * qualifiers: "TFT9_Item_OrnnHorizonFocus" -> "Ornn Horizon Focus",
+ * "TFT17_Item_DarkStarEmblemItem" -> "Dark Star Emblem".
+ */
+const stripItem = (id = ""): string =>
+  splitCamel(
+    id
+      .replace(/^TFT\d*_?Item_/i, "")
+      .replace(/^Artifact_/i, "")
+      .replace(/Item$/, ""),
+  );
+
+/** Thief's Gloves fills its unused slots with this placeholder. */
+const isRealItem = (id: string): boolean => !/EmptyBag$/i.test(id);
+
+/**
+ * Riot exposes internal traits alongside real ones -- stat buckets whose names
+ * end in "Trait"/"Tank" (ASTrait, HPTank, ManaTrait) and per-champion
+ * "…UniqueTrait" entries. They carry real style values, so without this filter
+ * they outrank the traits a player would actually name.
+ */
+function isDisplayTrait(t: Trait): boolean {
+  const short = t.name.replace(/^TFT\d*[a-z]*_/i, "");
+  if (/(Trait|Tank)$/.test(short)) return false;
+  // A champion-unique trait has a single breakpoint; real traits have 2+.
+  return (t.tier_total ?? 2) > 1;
+}
 
 const esc = (s: string): string => s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 
@@ -121,21 +158,59 @@ function duration(seconds: number | undefined): string {
 /** The 2-3 traits that actually define the board, strongest tier first. */
 function topTraits(traits: Trait[] = []): string[] {
   return traits
-    .filter((t) => (t.style ?? 0) > 0)
+    .filter((t) => (t.style ?? 0) > 0 && isDisplayTrait(t))
     .sort((a, b) => (b.style ?? 0) - (a.style ?? 0) || b.num_units - a.num_units)
     .slice(0, 3)
     .map((t) => `${t.num_units} ${stripSet(t.name)}`);
 }
 
-/** 3-stars first (they're the story), then the highest-cost units. */
+/** 3-stars first (they're the story), then the highest-cost units, with items. */
 function keyUnits(units: Unit[] = []): string[] {
   return [...units]
     .sort((a, b) => b.tier - a.tier || b.rarity - a.rarity)
     .slice(0, 3)
     .map((u) => {
-      const name = stripSet(u.character_id);
-      return u.tier >= 3 ? `⭐${name}` : name;
+      const name = u.tier >= 3 ? `⭐${stripSet(u.character_id)}` : stripSet(u.character_id);
+      const items = (u.itemNames ?? []).filter(isRealItem).map(stripItem);
+      return items.length ? `${name} — ${items.join(", ")}` : name;
     });
+}
+
+/** Double Up runs four teams of two, so a raw 1-8 placement reads wrong. */
+export function isPairs(info: MatchInfo): boolean {
+  return info.tft_game_type === "pairs";
+}
+
+/**
+ * Team standing in a Double Up lobby. Derived by ranking the partner groups on
+ * their best placement rather than halving the raw placement -- teammates
+ * happen to get adjacent numbers, but nothing documents that as guaranteed.
+ */
+function teamStanding(info: MatchInfo, me: Participant): { rank: number; teams: number } | null {
+  if (!isPairs(info) || me.partner_group_id === undefined) return null;
+
+  const bestByGroup = new Map<number, number>();
+  for (const p of info.participants) {
+    if (p.partner_group_id === undefined) continue;
+    const best = bestByGroup.get(p.partner_group_id);
+    if (best === undefined || p.placement < best) bestByGroup.set(p.partner_group_id, p.placement);
+  }
+
+  const mine = bestByGroup.get(me.partner_group_id);
+  if (mine === undefined) return null;
+
+  let ahead = 0;
+  for (const [group, best] of bestByGroup) {
+    if (group !== me.partner_group_id && best < mine) ahead++;
+  }
+  return { rank: ahead + 1, teams: bestByGroup.size };
+}
+
+/** The teammate's display name in a Double Up lobby, if it can be identified. */
+function partnerName(info: MatchInfo, me: Participant): string | null {
+  if (!isPairs(info) || me.partner_group_id === undefined) return null;
+  const mate = info.participants.find((p) => p.partner_group_id === me.partner_group_id && p.puuid !== me.puuid);
+  return mate?.riotIdGameName ?? null;
 }
 
 export function formatResult(args: {
@@ -147,11 +222,17 @@ export function formatResult(args: {
 }): string {
   const { displayName, match, me, rankEntry, lpDelta } = args;
   const info = match.info;
-  const placement = PLACEMENT_LABEL[me.placement - 1] ?? `${me.placement}th`;
+
+  // In Double Up the pair's standing is the result; the raw 1-8 placement makes
+  // the winner's partner look like they came 2nd.
+  const team = teamStanding(info, me);
+  const placement = team ? `${placementLabel(team.rank)} of ${team.teams} teams` : placementLabel(me.placement);
 
   const lines: string[] = [];
 
-  let header = `${placement} — <b>${esc(displayName)}</b>`;
+  const mate = partnerName(info, me);
+  const withMate = mate ? ` + ${esc(mate)}` : "";
+  let header = `${placement} — <b>${esc(displayName)}</b>${withMate}`;
   if (rankEntry) {
     let delta = "";
     if (lpDelta !== null) {
@@ -167,19 +248,19 @@ export function formatResult(args: {
   const traits = topTraits(me.traits);
   if (traits.length) lines.push(`🧩 ${esc(traits.join(" · "))}`);
 
+  // One carry per line: with items attached, a single joined line runs well past
+  // 150 characters and wraps badly on a phone.
   const units = keyUnits(me.units);
-  if (units.length) lines.push(`🎯 ${esc(units.join(", "))}`);
+  if (units.length) {
+    lines.push(units.map((u, i) => `${i === 0 ? "🎯" : "   "} ${esc(u)}`).join("\n"));
+  }
 
-  lines.push(
-    `📊 ${esc(
-      [
-        `Lv ${me.level}`,
-        `round ${me.last_round}`,
-        `${me.players_eliminated} elims`,
-        duration(me.time_eliminated ?? info.game_length),
-      ].join(" · "),
-    )}`,
-  );
+  const stats = [`Lv ${me.level}`, `round ${me.last_round}`];
+  if (me.total_damage_to_players !== undefined) stats.push(`${me.total_damage_to_players} dmg`);
+  if (me.players_eliminated > 0) stats.push(`${me.players_eliminated} elims`);
+  if (me.gold_left !== undefined) stats.push(`${me.gold_left}g left`);
+  stats.push(duration(me.time_eliminated ?? info.game_length));
+  lines.push(`📊 ${esc(stats.join(" · "))}`);
 
   return lines.join("\n");
 }
