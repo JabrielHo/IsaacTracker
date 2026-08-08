@@ -16,17 +16,32 @@ const TIERS = [
 const MASTER_INDEX = TIERS.indexOf("MASTER");
 const DIVISIONS: Record<string, number> = { IV: 0, III: 1, II: 2, I: 3 };
 
+/**
+ * Transcribed from DDragon's per-patch queue table, which is what the game
+ * client itself renders -- NOT from the developer-site queues.json, which lists
+ * four TFT queues and gets the rest wrong.
+ *
+ *   https://ddragon.leagueoflegends.com/cdn/16.15.1/data/en_US/tft-queues.json
+ *
+ * Mirrors that patch exactly: retired modes are dropped as Riot drops them, and
+ * a returning mode comes back under a NEW id anyway (Choncc's Treasure ran as
+ * 1190, then returned as 1210), so an old id is dead weight rather than a
+ * fallback. Anything missing renders as "Queue <id>" -- re-check this list
+ * against a current DDragon patch whenever one of those shows up.
+ */
 const QUEUES: Record<number, string> = {
   1090: "Normal",
   1100: "Ranked",
   1110: "Tutorial",
   1130: "Hyper Roll",
-  1150: "Double Up",
   1160: "Double Up",
   1170: "Fortune's Favor",
-  1180: "Soul Brawl",
-  1190: "Choncc's Treasure",
-  1210: "Tocker's Trials",
+  1210: "Choncc's Classic Treasure",
+  1220: "Tocker's Trials",
+  6000: "Revival: Festival of Beasts",
+  6100: "Choncc's K.O. Coliseum",
+  6120: "Pengu's Party",
+  6130: "Ao Shin's Ascent",
 };
 
 const PLACEMENT_LABEL = ["🥇 1st", "🥈 2nd", "🥉 3rd", "4th", "5th", "6th", "7th", "8th"];
@@ -101,8 +116,7 @@ const PROFILES = {
   },
   double_up: {
     leagueQueueType: "RANKED_TFT_DOUBLE_UP",
-    // Riot has used both ids for ranked Double Up across sets.
-    matchQueueIds: [1150, 1160],
+    matchQueueIds: [1160],
     label: "Double Up",
   },
 } as const satisfies Record<string, QueueProfile>;

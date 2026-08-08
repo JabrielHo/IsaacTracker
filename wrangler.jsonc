@@ -21,9 +21,6 @@
     "RIOT_PLATFORM": "sg2",
     "PLAYERS": "audioizzzaac#98k",
     "ANNOUNCE_GAME_START": "true",
-
-    // Which ranked ladder to report LP from: "solo" or "double_up".
-    // These are separate ranks — solo Emerald and Double Up Master can coexist.
     "TRACK_QUEUE": "double_up"
   },
 

@@ -146,7 +146,7 @@ still get measured against the right starting point.
 | Value | League queue | Match queues |
 |---|---|---|
 | `"solo"` | `RANKED_TFT` | 1100 |
-| `"double_up"` | `RANKED_TFT_DOUBLE_UP` | 1150, 1160 |
+| `"double_up"` | `RANKED_TFT_DOUBLE_UP` | 1160 |
 
 These are completely separate ranks — someone can be Emerald in solo and Master in
 Double Up at the same time. Games outside the tracked queue still get posted, just with
