@@ -44,6 +44,64 @@ const QUEUES: Record<number, string> = {
   6130: "Ao Shin's Ascent",
 };
 
+/**
+ * Trait API name -> in-game display name, transcribed from the same DDragon
+ * patch as QUEUES above:
+ *
+ *   https://ddragon.leagueoflegends.com/cdn/16.15.1/data/en_US/tft-trait.json
+ *
+ * Riot's API names are internal dev labels ("TFT17_HPTank" is Brawler,
+ * "TFT17_DRX" is N.O.V.A.), so nothing renderable can be derived from the id
+ * itself. Anything missing falls back to the de-prefixed id, which is at least
+ * legible -- re-transcribe this table when a new set ships.
+ */
+const TRAIT_NAMES: Record<string, string> = {
+  TFT17_ADMIN: "Arbiter",
+  TFT17_AnimaSquad: "Anima",
+  TFT17_APTrait: "Replicator",
+  TFT17_ASTrait: "Challenger",
+  TFT17_AssassinTrait: "Rogue",
+  TFT17_Astronaut: "Meeple",
+  TFT17_BlitzcrankUniqueTrait: "Party Animal",
+  TFT17_DarkStar: "Dark Star",
+  TFT17_DRX: "N.O.V.A.",
+  TFT17_Fateweaver: "Fateweaver",
+  TFT17_FioraUniqueTrait: "Divine Duelist",
+  TFT17_FlexTrait: "Voyager",
+  TFT17_GravesTrait: "Factory New",
+  TFT17_HPTank: "Brawler",
+  TFT17_JhinUniqueTrait: "Eradicator",
+  TFT17_ManaTrait: "Conduit",
+  TFT17_Mecha: "Mecha",
+  TFT17_MeleeTrait: "Marauder",
+  TFT17_MissFortuneUniqueTrait: "Gun Goddess",
+  TFT17_MorganaUniqueTrait: "Dark Lady",
+  TFT17_Primordian: "Primordian",
+  TFT17_PsyOps: "Psionic",
+  TFT17_RangedTrait: "Sniper",
+  TFT17_ResistTank: "Bastion",
+  TFT17_RhaastUniqueTrait: "Redeemer",
+  TFT17_ShenUniqueTrait: "Bulwark",
+  TFT17_ShieldTank: "Vanguard",
+  TFT17_SonaUniqueTrait: "Commander",
+  TFT17_SpaceGroove: "Space Groove",
+  TFT17_Stargazer: "Stargazer",
+  TFT17_Stargazer_Fountain: "Stargazer",
+  TFT17_Stargazer_Huntress: "Stargazer",
+  TFT17_Stargazer_Medallion: "Stargazer",
+  TFT17_Stargazer_Mountain: "Stargazer",
+  TFT17_Stargazer_Serpent: "Stargazer",
+  TFT17_Stargazer_Shield: "Stargazer",
+  TFT17_Stargazer_Wolf: "Stargazer",
+  TFT17_SummonTrait: "Shepherd",
+  TFT17_TahmKenchUniqueTrait: "Oracle",
+  TFT17_Timebreaker: "Timebreaker",
+  TFT17_VexUniqueTrait: "Doomer",
+  TFT17_ZedUniqueTrait: "Galaxy Hunter",
+};
+
+const traitName = (id: string): string => TRAIT_NAMES[id] ?? stripSet(id);
+
 const PLACEMENT_LABEL = ["🥇 1st", "🥈 2nd", "🥉 3rd", "4th", "5th", "6th", "7th", "8th"];
 
 /** Medal for the podium, plain ordinal past it. `n` is 1-based. */
@@ -67,24 +125,25 @@ const stripItem = (id = ""): string =>
     id
       .replace(/^TFT\d*_?Item_/i, "")
       .replace(/^Artifact_/i, "")
-      .replace(/Item$/, ""),
+      .replace(/Item$/, "")
+      .replaceAll("_", " "),
   );
+
+/**
+ * Emblems embed the trait's dev name ("TFT17_Item_RangedTraitEmblemItem"), so
+ * they go through the trait table to come out as "Sniper Emblem" rather than
+ * "Ranged Trait Emblem".
+ */
+function itemName(id: string): string {
+  const emblem = /^(TFT\d+)_Item_(\w+?)EmblemItem$/.exec(id);
+  if (!emblem) return stripItem(id);
+  const [, set, trait] = emblem;
+  const name = traitName(`${set}_${trait}`);
+  return `${name} Emblem`;
+}
 
 /** Thief's Gloves fills its unused slots with this placeholder. */
 const isRealItem = (id: string): boolean => !/EmptyBag$/i.test(id);
-
-/**
- * Riot exposes internal traits alongside real ones -- stat buckets whose names
- * end in "Trait"/"Tank" (ASTrait, HPTank, ManaTrait) and per-champion
- * "…UniqueTrait" entries. They carry real style values, so without this filter
- * they outrank the traits a player would actually name.
- */
-function isDisplayTrait(t: Trait): boolean {
-  const short = t.name.replace(/^TFT\d*[a-z]*_/i, "");
-  if (/(Trait|Tank)$/.test(short)) return false;
-  // A champion-unique trait has a single breakpoint; real traits have 2+.
-  return (t.tier_total ?? 2) > 1;
-}
 
 const esc = (s: string): string => s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 
@@ -169,25 +228,69 @@ function duration(seconds: number | undefined): string {
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
 }
 
-/** The 2-3 traits that actually define the board, strongest tier first. */
-function topTraits(traits: Trait[] = []): string[] {
-  return traits
-    .filter((t) => (t.style ?? 0) > 0 && isDisplayTrait(t))
-    .sort((a, b) => (b.style ?? 0) - (a.style ?? 0) || b.num_units - a.num_units)
-    .slice(0, 3)
-    .map((t) => `${t.num_units} ${stripSet(t.name)}`);
+/**
+ * Riot only exposes a flat round counter, but everyone reads stages: op.gg and
+ * the in-game UI both say "5-6", never "round 31". Stage 1 is four PvE rounds,
+ * every stage after that is seven.
+ */
+function stageLabel(round: number): string {
+  if (round <= 4) return `1-${round}`;
+  return `${2 + Math.floor((round - 5) / 7)}-${((round - 5) % 7) + 1}`;
 }
 
-/** 3-stars first (they're the story), then the highest-cost units, with items. */
-function keyUnits(units: Unit[] = []): string[] {
-  return [...units]
+/**
+ * Double Up artifact: the runner-up pair's participants can come back with the
+ * entire units array repeated and every trait count doubled (both halves
+ * identical, item-for-item -- seen on SG2_168390390, where it produced "10
+ * N.O.V.A." on an 8-unit board and the same carry listed twice). Two identical
+ * champions holding identical items is legal, but a board whose first half
+ * equals its second half exactly is the artifact, not a comp.
+ */
+function undouble(p: Participant): Participant {
+  const units = p.units ?? [];
+  const half = units.length / 2;
+  if (units.length < 4 || !Number.isInteger(half)) return p;
+  if (JSON.stringify(units.slice(0, half)) !== JSON.stringify(units.slice(half))) return p;
+  return {
+    ...p,
+    units: units.slice(0, half),
+    traits: (p.traits ?? []).map((t) => ({ ...t, num_units: Math.ceil(t.num_units / 2) })),
+  };
+}
+
+/**
+ * Every active trait, strongest style first -- the same set and order as the
+ * trait chips on an op.gg match card. style 0 means the trait never hit its
+ * first breakpoint, which is the only kind worth dropping: what look like
+ * internal stat buckets (ASTrait, HPTank) are real traits under dev names,
+ * and TRAIT_NAMES carries their display names.
+ */
+function activeTraits(traits: Trait[] = []): string[] {
+  return traits
+    .filter((t) => (t.style ?? 0) > 0)
+    .sort((a, b) => (b.style ?? 0) - (a.style ?? 0) || b.num_units - a.num_units)
+    .map((t) => `${t.num_units} ${traitName(t.name)}`);
+}
+
+/**
+ * The whole final board with star levels, 3-stars first, then highest cost.
+ * Itemized units get a line each; itemless ones are folded into a single
+ * trailing line, which is what keeps a 9-unit board from taking 9 rows on a
+ * phone.
+ */
+function boardLines(units: Unit[] = []): string[] {
+  const named = [...units]
     .sort((a, b) => b.tier - a.tier || b.rarity - a.rarity)
-    .slice(0, 3)
-    .map((u) => {
-      const name = u.tier >= 3 ? `⭐${stripSet(u.character_id)}` : stripSet(u.character_id);
-      const items = (u.itemNames ?? []).filter(isRealItem).map(stripItem);
-      return items.length ? `${name} — ${items.join(", ")}` : name;
-    });
+    .map((u) => ({
+      // Star level on every unit, like op.gg -- text stars, not the ⭐ emoji,
+      // which at three-per-unit would swallow the names around it.
+      name: `${"★".repeat(u.tier)}${stripSet(u.character_id)}`,
+      items: (u.itemNames ?? []).filter(isRealItem).map(itemName),
+    }));
+  const lines = named.filter((n) => n.items.length).map((n) => `${n.name} — ${n.items.join(", ")}`);
+  const bare = named.filter((n) => !n.items.length).map((n) => n.name);
+  if (bare.length) lines.push(bare.join(" · "));
+  return lines;
 }
 
 /** Double Up runs four teams of two, so a raw 1-8 placement reads wrong. */
@@ -234,7 +337,8 @@ export function formatResult(args: {
   rankEntry: LeagueEntry | null;
   lpDelta: number | null;
 }): string {
-  const { displayName, match, me, rankEntry, lpDelta } = args;
+  const { displayName, match, rankEntry, lpDelta } = args;
+  const me = undouble(args.me);
   const info = match.info;
 
   // In Double Up the pair's standing is the result; the raw 1-8 placement makes
@@ -259,17 +363,17 @@ export function formatResult(args: {
   }
   lines.push(header);
 
-  const traits = topTraits(me.traits);
+  const traits = activeTraits(me.traits);
   if (traits.length) lines.push(`🧩 ${esc(traits.join(" · "))}`);
 
-  // One carry per line: with items attached, a single joined line runs well past
-  // 150 characters and wraps badly on a phone.
-  const units = keyUnits(me.units);
+  // One itemized unit per line: with items attached, a single joined line runs
+  // well past 150 characters and wraps badly on a phone.
+  const units = boardLines(me.units);
   if (units.length) {
     lines.push(units.map((u, i) => `${i === 0 ? "🎯" : "   "} ${esc(u)}`).join("\n"));
   }
 
-  const stats = [`Lv ${me.level}`, `round ${me.last_round}`];
+  const stats = [`Lv ${me.level}`, `stage ${stageLabel(me.last_round)}`];
   if (me.total_damage_to_players !== undefined) stats.push(`${me.total_damage_to_players} dmg`);
   if (me.players_eliminated > 0) stats.push(`${me.players_eliminated} elims`);
   if (me.gold_left !== undefined) stats.push(`${me.gold_left}g left`);
