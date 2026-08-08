@@ -216,7 +216,7 @@ async function checkPlayer(
 /** How long to stop asking after the spectator endpoint refuses us. */
 const SPECTATOR_RETRY_MS = 24 * 60 * 60 * 1000;
 
-async function reportPlayerError(env: Env, state: TrackerState, riotId: string, err: unknown): Promise<void> {
+function reportPlayerError(state: TrackerState, riotId: string, err: unknown): void {
   if (err instanceof RiotError && err.isRateLimited) {
     // Nothing to gain from sleeping inside a cron invocation — the next
     // tick is a minute away, which is longer than any Riot backoff.
@@ -225,12 +225,10 @@ async function reportPlayerError(env: Env, state: TrackerState, riotId: string, 
   }
 
   if (err instanceof RiotError && err.isAuthFailure) {
-    console.error(`[auth] ${err.message}`);
-    if (state.keyAlerted) return;
+    // Failures stay out of the chat, which is for game results only. The flag
+    // is still recorded so the status page can show that the key was rejected.
+    console.error(`[auth] ${err.message} — run \`wrangler secret put RIOT_API_KEY\` with a fresh key`);
     state.keyAlerted = true;
-    await sender(env)(
-      "🔑 Riot API key rejected — it has probably expired. Run <code>wrangler secret put RIOT_API_KEY</code> with a fresh one.",
-    ).catch((e) => console.error(`[telegram] ${(e as Error).message}`));
     return;
   }
 
@@ -270,7 +268,7 @@ export async function runCycle(env: Env): Promise<void> {
       await checkPlayer(riot, env, cfg, state, riotId);
       state.keyAlerted = false;
     } catch (err) {
-      await reportPlayerError(env, state, riotId, err);
+      reportPlayerError(state, riotId, err);
     }
   }
 

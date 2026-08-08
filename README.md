@@ -204,7 +204,8 @@ roughly a dozen before the 2-minute rate limit matters. Set `ANNOUNCE_GAME_START
 
 - State lives in KV under `state:v1`. Delete the key to reset; the tracker re-baselines
   silently rather than spamming old games.
-- If the Riot key expires, the bot posts one 🔑 warning, then stays quiet until the key
-  is replaced.
+- Failures never reach the chat, which carries game results only. If the Riot key expires
+  the tracker goes quiet and records it in the Worker logs (`wrangler tail`) and in
+  `keyAlerted` on the status page.
 - LP deltas only appear when exactly one game happened between checks, since a single
   rank snapshot can't be split across two games.
