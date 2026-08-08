@@ -287,8 +287,15 @@ export default {
     ctx.waitUntil(runCycle(env).catch((err) => console.error(`[cycle] ${(err as Error).message}`)));
   },
 
-  // Status page. Handy after deploying, and `wrangler dev` uses the separate
-  // /__scheduled route to fire the cron handler on demand.
+  // Status page. Unreachable in production -- wrangler.jsonc sets workers_dev
+  // and preview_urls to false, so the deployed Worker has no route at all. This
+  // exists for `wrangler dev`, which also uses the separate /__scheduled route
+  // to fire the cron handler on demand.
+  //
+  // If you ever give the Worker a public hostname again, note what this returns:
+  // a Riot ID and a live "in a game" flag. It builds its response from an
+  // explicit field list rather than spreading state, which is what keeps `puuid`
+  // out of it -- worth preserving.
   async fetch(_req: Request, env: Env): Promise<Response> {
     const state = await loadState(env);
     const summary = Object.entries(state.players).map(([riotId, p]) => ({

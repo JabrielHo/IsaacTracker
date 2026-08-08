@@ -99,8 +99,21 @@ npx wrangler deploy
 That's it — the cron starts firing every minute. First run posts `👀 Now tracking …`
 rather than dumping recent match history.
 
-Watch it live with `npm run tail`, or hit the Worker's URL in a browser for a status
-JSON showing who's tracked and the last match announced.
+Watch it live with `npm run tail`.
+
+**The Worker has no public URL.** `workers_dev` and `preview_urls` are both `false` in
+[wrangler.jsonc](wrangler.jsonc) — cron triggers don't need a route, and a reachable
+`workers.dev` hostname would publish the status JSON (a Riot ID, the last match id, and
+whether they're in a game) to anyone who scanned for it, at the cost of a KV read and an
+invocation per hit. Set them back to `true` if you want it, ideally behind
+[Cloudflare Access](https://developers.cloudflare.com/workers/configuration/routing/workers-dev/),
+which works on `workers.dev` without a custom domain. WAF and rate-limiting rules do not.
+
+Note that this has to be set in the config file, not just the dashboard: disabling the
+route in the Cloudflare UI alone means your next `wrangler deploy` turns it back on.
+
+The `fetch` handler stays in [src/index.ts](src/index.ts) for `wrangler dev` — see
+Local development below.
 
 ## Local development
 
@@ -111,7 +124,9 @@ npm run dev
 ```
 
 `wrangler dev` simulates KV locally. Fire the cron handler on demand by visiting
-`http://127.0.0.1:8787/__scheduled` — nothing is written to production.
+`http://127.0.0.1:8787/__scheduled` — nothing is written to production. The status JSON
+is at `http://127.0.0.1:8787/`, which is the only place it's reachable now that the
+deployed Worker has no route.
 
 Type-check without deploying:
 
