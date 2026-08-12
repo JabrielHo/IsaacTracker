@@ -10,16 +10,20 @@ Tracking `audioizzzaac#98k` on Singapore (`sg2`) by default.
 ```
 🥇 1st of 4 teams — audioizzzaac#98K + jkyz49
 Master 251 LP (+34 LP)
-🧩 2 DRX · 1 Space Groove
-🎯 ⭐Miss Fortune — Deathblade, Deathblade, Guinsoos Rageblade
-    ⭐Maokai — Frozen Heart, Dragons Claw
-    ⭐Urgot — Titans Resolve, Unstable Concoction, Quicksilver
-📊 Lv 7 · round 34 · 56 dmg · 29g left · 33:43
+🧩 2 N.O.V.A. · 1 Space Groove
+🎯 🟡★★Miss Fortune — Deathblade, Deathblade, Guinsoos Rageblade
+    🟢★★Maokai — Frozen Heart, Dragons Claw
+    🟣★Urgot — Titans Resolve, Unstable Concoction, Quicksilver
+📊 Lv 7 · stage 5-3 · 56 dmg · 29g left · 33:43
 ```
+
+The coloured dots are unit cost (⚪🟢🔵🟣🟡 for 1–5), matching the border
+colours op.gg uses.
 
 In Double Up the **team** standing is reported, not the raw 1–8 placement —
 teammates get adjacent numbers, so a raw "2nd" is actually the winning pair's
-other half. Solo games show the plain placement. Remakes and aborted lobbies
+other half. Medals only go to the top two teams, the ones that gain LP. Solo
+games show the plain placement. Remakes and aborted lobbies
 (`endOfGameResult` other than `GameComplete`) are recorded but not posted.
 
 Plus a `🎮 just queued into a game` ping when a game starts.

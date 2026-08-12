@@ -104,9 +104,19 @@ const traitName = (id: string): string => TRAIT_NAMES[id] ?? stripSet(id);
 
 const PLACEMENT_LABEL = ["🥇 1st", "🥈 2nd", "🥉 3rd", "4th", "5th", "6th", "7th", "8th"];
 
+/**
+ * Only the top two teams gain LP in Double Up, so a 🥉 on "3rd of 4" would sit
+ * next to a negative LP delta and read as a win.
+ */
+const TEAM_LABEL = ["🥇 1st", "🥈 2nd", "3rd", "4th"];
+
 /** Medal for the podium, plain ordinal past it. `n` is 1-based. */
 function placementLabel(n: number): string {
   return PLACEMENT_LABEL[n - 1] ?? `${n}th`;
+}
+
+function teamLabel(n: number): string {
+  return TEAM_LABEL[n - 1] ?? `${n}th`;
 }
 
 /** "DarkStar" -> "Dark Star". Leaves acronyms like "DRX" and "ADMIN" alone. */
@@ -136,10 +146,24 @@ const stripItem = (id = ""): string =>
  */
 function itemName(id: string): string {
   const emblem = /^(TFT\d+)_Item_(\w+?)EmblemItem$/.exec(id);
-  if (!emblem) return stripItem(id);
-  const [, set, trait] = emblem;
-  const name = traitName(`${set}_${trait}`);
-  return `${name} Emblem`;
+  if (emblem) {
+    const [, set, trait] = emblem;
+    const name = traitName(set + "_" + trait);
+    return `${name} Emblem`;
+  }
+
+  // Set-mechanic items nest a mechanic segment and an upgrade tier that
+  // stripItem's prefix rule can't see: "TFT17_AnimaSquad_Item_Tier2_UwuBlaster"
+  // would otherwise render as "TFT17 Anima Squad Item Tier2 Uwu Blaster". The
+  // tier is the weapon's upgrade level — real information — so it's kept, just
+  // compressed.
+  const mechanic = /^TFT\d+_\w+_Item_(?:Tier(\d+)_)?(\w+)$/.exec(id);
+  if (mechanic) {
+    const [, tier, name] = mechanic;
+    return splitCamel((name ?? "").replaceAll("_", " ")) + (tier ? ` (T${tier})` : "");
+  }
+
+  return stripItem(id);
 }
 
 /** Thief's Gloves fills its unused slots with this placeholder. */
@@ -273,6 +297,13 @@ function activeTraits(traits: Trait[] = []): string[] {
 }
 
 /**
+ * `rarity` is not the shop cost: it runs on a doubled scale (0/1/2/4/6). Mapped
+ * to the cost colours op.gg paints on unit borders. Values outside the table
+ * (future 6-costs, set-mechanic specials) get no dot rather than a wrong colour.
+ */
+const COST_DOT: Record<number, string> = { 0: "⚪", 1: "🟢", 2: "🔵", 4: "🟣", 6: "🟡" };
+
+/**
  * The whole final board with star levels, 3-stars first, then highest cost.
  * Itemized units get a line each; itemless ones are folded into a single
  * trailing line, which is what keeps a 9-unit board from taking 9 rows on a
@@ -284,7 +315,7 @@ function boardLines(units: Unit[] = []): string[] {
     .map((u) => ({
       // Star level on every unit, like op.gg -- text stars, not the ⭐ emoji,
       // which at three-per-unit would swallow the names around it.
-      name: `${"★".repeat(u.tier)}${stripSet(u.character_id)}`,
+      name: `${COST_DOT[u.rarity] ?? ""}${"★".repeat(u.tier)}${stripSet(u.character_id)}`,
       items: (u.itemNames ?? []).filter(isRealItem).map(itemName),
     }));
   const lines = named.filter((n) => n.items.length).map((n) => `${n.name} — ${n.items.join(", ")}`);
@@ -344,7 +375,7 @@ export function formatResult(args: {
   // In Double Up the pair's standing is the result; the raw 1-8 placement makes
   // the winner's partner look like they came 2nd.
   const team = teamStanding(info, me);
-  const placement = team ? `${placementLabel(team.rank)} of ${team.teams} teams` : placementLabel(me.placement);
+  const placement = team ? `${teamLabel(team.rank)} of ${team.teams} teams` : placementLabel(me.placement);
 
   const lines: string[] = [];
 
