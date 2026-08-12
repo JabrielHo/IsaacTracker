@@ -1,4 +1,4 @@
-import type { LeagueEntry, Match, RiotAccount } from "./types";
+import type { LeagueEntry, Match, Participant, RiotAccount } from "./types";
 
 const PLATFORM_TO_MATCH_CLUSTER: Record<string, string> = {
   na1: "americas",
@@ -25,17 +25,14 @@ const PLATFORM_TO_MATCH_CLUSTER: Record<string, string> = {
 const ACCOUNT_CLUSTERS = ["asia", "americas", "europe"] as const;
 
 export class RiotError extends Error {
-  private static describe(status: number, url: string, body: string): string {
-    const detail = body ? ` :: ${body.slice(0, 200)}` : "";
-    return `Riot API ${status} for ${url}${detail}`;
-  }
-
   constructor(
     readonly status: number,
     readonly url: string,
     body = "",
   ) {
-    super(RiotError.describe(status, url, body));
+    // Concatenation because parameter properties force super() to be the first
+    // statement -- there is nowhere earlier to build the string.
+    super("Riot API " + status + " for " + url + (body ? " :: " + body.slice(0, 200) : ""));
     this.name = "RiotError";
   }
 
@@ -46,6 +43,26 @@ export class RiotError extends Error {
   get isRateLimited(): boolean {
     return this.status === 429;
   }
+}
+
+/**
+ * Double Up artifact: the runner-up pair's participants can come back with the
+ * entire units array repeated and every trait count doubled (both halves
+ * identical, item-for-item -- seen on SG2_168390390, where it produced "10
+ * N.O.V.A." on an 8-unit board and the same carry listed twice). Two identical
+ * champions holding identical items is legal, but a board whose first half
+ * equals its second half exactly is the artifact, not a comp.
+ */
+function undouble(p: Participant): Participant {
+  const units = p.units ?? [];
+  const half = units.length / 2;
+  if (units.length < 4 || !Number.isInteger(half)) return p;
+  if (JSON.stringify(units.slice(0, half)) !== JSON.stringify(units.slice(half))) return p;
+  return {
+    ...p,
+    units: units.slice(0, half),
+    traits: (p.traits ?? []).map((t) => ({ ...t, num_units: Math.ceil(t.num_units / 2) })),
+  };
 }
 
 export interface RiotClientOptions {
@@ -135,6 +152,9 @@ export class RiotClient {
   async match(matchId: string): Promise<Match> {
     const match = await this.get<Match>(this.matchCluster, `/tft/match/v1/matches/${matchId}`);
     if (!match) throw new Error(`Match ${matchId} not found`);
+    // Repaired here, at the API boundary, so every consumer sees clean data
+    // rather than each render path fixing the payload for itself.
+    match.info.participants = (match.info.participants ?? []).map(undouble);
     return match;
   }
 

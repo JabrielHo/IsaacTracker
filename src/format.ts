@@ -110,13 +110,9 @@ const PLACEMENT_LABEL = ["🥇 1st", "🥈 2nd", "🥉 3rd", "4th", "5th", "6th"
  */
 const TEAM_LABEL = ["🥇 1st", "🥈 2nd", "3rd", "4th"];
 
-/** Medal for the podium, plain ordinal past it. `n` is 1-based. */
-function placementLabel(n: number): string {
-  return PLACEMENT_LABEL[n - 1] ?? `${n}th`;
-}
-
-function teamLabel(n: number): string {
-  return TEAM_LABEL[n - 1] ?? `${n}th`;
+/** Label from the table, plain ordinal past its end. `n` is 1-based. */
+function ordinal(table: readonly string[], n: number): string {
+  return table[n - 1] ?? `${n}th`;
 }
 
 /** "DarkStar" -> "Dark Star". Leaves acronyms like "DRX" and "ADMIN" alone. */
@@ -126,44 +122,41 @@ const splitCamel = (s: string): string => s.replace(/([a-z])([A-Z])/g, "$1 $2");
 const stripSet = (id = ""): string => splitCamel(id.replace(/^TFT\d*[a-z]*_/i, "").replaceAll("_", " "));
 
 /**
- * Item ids carry their own prefixes and, for artifact/emblem variants, extra
- * qualifiers: "TFT9_Item_OrnnHorizonFocus" -> "Ornn Horizon Focus",
- * "TFT17_Item_DarkStarEmblemItem" -> "Dark Star Emblem".
- */
-const stripItem = (id = ""): string =>
-  splitCamel(
-    id
-      .replace(/^TFT\d*_?Item_/i, "")
-      .replace(/^Artifact_/i, "")
-      .replace(/Item$/, "")
-      .replaceAll("_", " "),
-  );
-
-/**
- * Emblems embed the trait's dev name ("TFT17_Item_RangedTraitEmblemItem"), so
- * they go through the trait table to come out as "Sniper Emblem" rather than
- * "Ranged Trait Emblem".
+ * Item ids are underscore-joined segments around an "Item" marker, decorated
+ * with optional qualifiers. One tokenizing pass handles every shape, so each
+ * rule is stated exactly once instead of once per id variant:
+ *
+ *   TFT_Item_InfinityEdge                  -> "Infinity Edge"
+ *   TFT9_Item_OrnnHorizonFocus             -> "Ornn Horizon Focus"
+ *   TFT17_Item_RangedTraitEmblemItem       -> "Sniper Emblem"
+ *   TFT17_AnimaSquad_Item_Tier2_UwuBlaster -> "Uwu Blaster (T2)"
+ *
+ * Emblems embed the trait's dev name, which only the trait table can translate
+ * ("Sniper Emblem", not "Ranged Trait Emblem"). The mechanic segment before the
+ * marker ("AnimaSquad") is dropped — the unit holding the item already implies
+ * it — while the upgrade tier is real information and kept, compressed.
  */
 function itemName(id: string): string {
-  const emblem = /^(TFT\d+)_Item_(\w+?)EmblemItem$/.exec(id);
-  if (emblem) {
-    const [, set, trait] = emblem;
-    const name = traitName(set + "_" + trait);
-    return `${name} Emblem`;
-  }
+  const tokens = id.split("_");
 
-  // Set-mechanic items nest a mechanic segment and an upgrade tier that
-  // stripItem's prefix rule can't see: "TFT17_AnimaSquad_Item_Tier2_UwuBlaster"
-  // would otherwise render as "TFT17 Anima Squad Item Tier2 Uwu Blaster". The
-  // tier is the weapon's upgrade level — real information — so it's kept, just
-  // compressed.
-  const mechanic = /^TFT\d+_\w+_Item_(?:Tier(\d+)_)?(\w+)$/.exec(id);
-  if (mechanic) {
-    const [, tier, name] = mechanic;
-    return splitCamel((name ?? "").replaceAll("_", " ")) + (tier ? ` (T${tier})` : "");
-  }
+  let set = "";
+  if (/^TFT\d*[a-z]*$/i.test(tokens[0] ?? "")) set = tokens.shift() ?? "";
 
-  return stripItem(id);
+  const marker = tokens.indexOf("Item");
+  if (marker >= 0) tokens.splice(0, marker + 1);
+
+  let tier = "";
+  const rest = tokens.filter((t) => {
+    const m = /^Tier(\d+)$/.exec(t);
+    if (m) tier = ` (T${m[1]})`;
+    return !m && t !== "Artifact";
+  });
+
+  const joined = rest.join(" ");
+  const emblem = /^(\w+?)EmblemItem$/.exec(joined);
+  if (emblem && set) return `${traitName(set + "_" + emblem[1])} Emblem${tier}`;
+
+  return splitCamel(joined.replace(/Item$/, "")) + tier;
 }
 
 /** Thief's Gloves fills its unused slots with this placeholder. */
@@ -171,13 +164,13 @@ const isRealItem = (id: string): boolean => !/EmptyBag$/i.test(id);
 
 const esc = (s: string): string => s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 
-export function queueId(info: MatchInfo): number | undefined {
+function queueId(info: MatchInfo): number | undefined {
   return info.queue_id ?? info.queueId;
 }
 
 export function queueName(info: MatchInfo): string {
   const id = queueId(info);
-  return (id !== undefined ? QUEUES[id] : undefined) ?? `Queue ${id}`;
+  return QUEUES[id ?? -1] ?? `Queue ${id}`;
 }
 
 /**
@@ -209,14 +202,16 @@ export const QUEUE_NAMES = Object.keys(PROFILES);
 /**
  * Returns undefined for anything unrecognised so the caller can reject it.
  * Silently falling back to solo would track the wrong ladder forever on a typo.
+ * Defaulting an unset value is the caller's decision — all config policy lives
+ * in readConfig, not here.
  */
-export function resolveQueueProfile(name?: string): QueueProfile | undefined {
-  const key = (name ?? "solo").toLowerCase().replace(/[\s-]/g, "_");
+export function resolveQueueProfile(name: string): QueueProfile | undefined {
+  const key = name.toLowerCase().replace(/[\s-]/g, "_");
   return key in PROFILES ? PROFILES[key as keyof typeof PROFILES] : undefined;
 }
 
 /** True when this match belongs to the ladder we're tracking. */
-export function isTrackedQueue(info: MatchInfo, profile: QueueProfile): boolean {
+function isTrackedQueue(info: MatchInfo, profile: QueueProfile): boolean {
   const id = queueId(info);
   return id !== undefined && profile.matchQueueIds.includes(id);
 }
@@ -263,26 +258,6 @@ function stageLabel(round: number): string {
 }
 
 /**
- * Double Up artifact: the runner-up pair's participants can come back with the
- * entire units array repeated and every trait count doubled (both halves
- * identical, item-for-item -- seen on SG2_168390390, where it produced "10
- * N.O.V.A." on an 8-unit board and the same carry listed twice). Two identical
- * champions holding identical items is legal, but a board whose first half
- * equals its second half exactly is the artifact, not a comp.
- */
-function undouble(p: Participant): Participant {
-  const units = p.units ?? [];
-  const half = units.length / 2;
-  if (units.length < 4 || !Number.isInteger(half)) return p;
-  if (JSON.stringify(units.slice(0, half)) !== JSON.stringify(units.slice(half))) return p;
-  return {
-    ...p,
-    units: units.slice(0, half),
-    traits: (p.traits ?? []).map((t) => ({ ...t, num_units: Math.ceil(t.num_units / 2) })),
-  };
-}
-
-/**
  * Every active trait, strongest style first -- the same set and order as the
  * trait chips on an op.gg match card. style 0 means the trait never hit its
  * first breakpoint, which is the only kind worth dropping: what look like
@@ -325,7 +300,7 @@ function boardLines(units: Unit[] = []): string[] {
 }
 
 /** Double Up runs four teams of two, so a raw 1-8 placement reads wrong. */
-export function isPairs(info: MatchInfo): boolean {
+function isPairs(info: MatchInfo): boolean {
   return info.tft_game_type === "pairs";
 }
 
@@ -365,17 +340,23 @@ export function formatResult(args: {
   displayName: string;
   match: Match;
   me: Participant;
-  rankEntry: LeagueEntry | null;
+  entry: LeagueEntry | null;
+  queue: QueueProfile;
   lpDelta: number | null;
 }): string {
-  const { displayName, match, rankEntry, lpDelta } = args;
-  const me = undouble(args.me);
+  const { displayName, match, me, entry, queue, lpDelta } = args;
   const info = match.info;
+
+  // Rank and LP only make sense on the tracked ladder; anything else gets the
+  // queue name as its second line instead.
+  const rankEntry = isTrackedQueue(info, queue) ? entry : null;
 
   // In Double Up the pair's standing is the result; the raw 1-8 placement makes
   // the winner's partner look like they came 2nd.
   const team = teamStanding(info, me);
-  const placement = team ? `${teamLabel(team.rank)} of ${team.teams} teams` : placementLabel(me.placement);
+  const placement = team
+    ? `${ordinal(TEAM_LABEL, team.rank)} of ${team.teams} teams`
+    : ordinal(PLACEMENT_LABEL, me.placement);
 
   const lines: string[] = [];
 
@@ -417,4 +398,8 @@ export function formatResult(args: {
 export function formatGameStart(displayName: string, rankEntry: LeagueEntry | null): string {
   const rank = rankEntry ? ` · ${rankLabel(rankEntry)}` : "";
   return `🎮 <b>${esc(displayName)}</b> just queued into a game${esc(rank)}`;
+}
+
+export function formatTracking(displayName: string, entry: LeagueEntry | null, queueLabel: string): string {
+  return `👀 Now tracking <b>${esc(displayName)}</b> — ${esc(rankLabel(entry))} (${esc(queueLabel)})`;
 }

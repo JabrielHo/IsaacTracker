@@ -3,10 +3,9 @@ import { sendMessage } from "./telegram";
 import {
   formatGameStart,
   formatResult,
-  isTrackedQueue,
+  formatTracking,
   ladderPoints,
   QUEUE_NAMES,
-  rankLabel,
   resolveQueueProfile,
   type QueueProfile,
 } from "./format";
@@ -39,9 +38,9 @@ function readConfig(env: Env): Config {
     .filter(Boolean);
   if (!players.length) throw new Error("PLAYERS is empty — set it in wrangler.jsonc");
 
-  // Validated here with the other config rather than defaulted silently in
-  // format.ts: a typo would otherwise track the wrong ladder indefinitely.
-  const queue = resolveQueueProfile(env.TRACK_QUEUE);
+  // Both the default and the validation live here with the other config, not
+  // in format.ts: a typo would otherwise track the wrong ladder indefinitely.
+  const queue = resolveQueueProfile(env.TRACK_QUEUE ?? "solo");
   if (!queue) {
     throw new Error(`TRACK_QUEUE is "${env.TRACK_QUEUE}" — expected one of: ${QUEUE_NAMES.join(", ")}`);
   }
@@ -91,8 +90,9 @@ type Send = (text: string) => Promise<void>;
 /** Memoised per player per cycle — see checkPlayer. */
 type EntryFetcher = () => Promise<LeagueEntry | null>;
 
-function sender(env: Env): Send {
-  return (text) => sendMessage(env.TELEGRAM_BOT_TOKEN, env.TELEGRAM_CHAT_ID, text);
+/** Newest first, capped so the KV state document can't grow unbounded. */
+function markSeen(player: PlayerState, matchId: string): void {
+  player.seen = [matchId, ...player.seen].slice(0, 25);
 }
 
 /**
@@ -107,7 +107,7 @@ async function bootstrapPlayer(
   getEntry: EntryFetcher,
 ): Promise<void> {
   const entry = await getEntry();
-  await send(`👀 Now tracking <b>${player.displayName}</b> — ${rankLabel(entry)} (${cfg.queue.label})`);
+  await send(formatTracking(player.displayName, entry, cfg.queue.label));
   // Commit only once the message has actually landed. Marking the player
   // bootstrapped first would mean a transient Telegram failure silently
   // consumed the announcement with no retry -- the same reason `seen` in
@@ -141,7 +141,7 @@ async function announceMatches(
     const outcome = match.info.endOfGameResult;
     if (outcome !== undefined && outcome !== "GameComplete") {
       console.log(`[skip] ${matchId} ended as ${outcome}`);
-      player.seen = [matchId, ...player.seen].slice(0, 25);
+      markSeen(player, matchId);
       continue;
     }
 
@@ -153,11 +153,12 @@ async function announceMatches(
         displayName: player.displayName,
         match,
         me,
-        rankEntry: isTrackedQueue(match.info, cfg.queue) ? entry : null,
+        entry,
+        queue: cfg.queue,
         lpDelta: delta,
       }),
     );
-    player.seen = [matchId, ...player.seen].slice(0, 25);
+    markSeen(player, matchId);
   }
 
   // Only advance the LP baseline once the whole backlog has been announced,
@@ -181,15 +182,13 @@ async function announceLiveGame(
 
 async function checkPlayer(
   riot: RiotClient,
-  env: Env,
   cfg: Config,
   state: TrackerState,
   riotId: string,
+  send: Send,
 ): Promise<void> {
-  const send = sender(env);
-
   const player = await ensurePlayer(riot, state, riotId);
-  const ids = await riot.recentMatchIds(player.puuid, 5);
+  const ids = await riot.recentMatchIds(player.puuid);
 
   // A player who finishes a game and immediately requeues hits both the
   // match-result and game-start paths in one tick. Rank can't change between
@@ -263,9 +262,11 @@ export async function runCycle(env: Env): Promise<void> {
     now,
   });
 
+  const send: Send = (text) => sendMessage(env.TELEGRAM_BOT_TOKEN, env.TELEGRAM_CHAT_ID, text);
+
   for (const riotId of cfg.players) {
     try {
-      await checkPlayer(riot, env, cfg, state, riotId);
+      await checkPlayer(riot, cfg, state, riotId, send);
       state.keyAlerted = false;
     } catch (err) {
       reportPlayerError(state, riotId, err);

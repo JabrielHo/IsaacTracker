@@ -34,8 +34,6 @@ export interface Trait {
   name: string;
   num_units: number;
   style?: number;
-  /** Number of breakpoints. Champion-unique traits have exactly 1. */
-  tier_total?: number;
 }
 
 export interface Unit {
@@ -57,7 +55,6 @@ export interface Participant {
   /** Double Up only: teammates share this id. */
   partner_group_id?: number;
   riotIdGameName?: string;
-  riotIdTagline?: string;
   traits: Trait[];
   units: Unit[];
 }
@@ -91,7 +88,7 @@ export interface PlayerState {
 
 export interface TrackerState {
   players: Record<string, PlayerState>;
-  /** Set once we've warned the chat about a dead API key, so we only warn once. */
+  /** Set when the Riot key was rejected. Surfaced on the status page, never in chat. */
   keyAlerted?: boolean;
   /**
    * Epoch ms before which we skip the TFT spectator endpoint. Dev keys aren't
