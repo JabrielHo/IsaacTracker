@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "isaactracker",
+  "name": "tfttracker",
   "main": "src/index.ts",
   "compatibility_date": "2026-08-01",
 
@@ -9,18 +9,6 @@
     "crons": ["* * * * *"]
   },
 
-  // No public URL. Cron triggers don't need a route, and the status page in
-  // src/index.ts leaks a Riot ID and a "currently playing" flag to anyone who
-  // finds the hostname — workers.dev subdomains do get scanned. Every hit would
-  // also cost a KV read and an invocation out of the same free-tier budgets the
-  // cron depends on.
-  //
-  // These must live here, not just in the dashboard: turning the route off in
-  // the Cloudflare UI without setting this key means the next `wrangler deploy`
-  // silently switches it back on.
-  //
-  // preview_urls covers the versioned "<version>-tft-tracker.<sub>.workers.dev"
-  // hostnames, which are a separate door from the main route.
   "workers_dev": false,
   "preview_urls": false,
 
