@@ -1,13 +1,16 @@
 import { RiotClient, RiotError } from "./riot";
 import { sendMessage } from "./telegram";
 import {
+  ALL_QUEUE_PROFILES,
   formatGameStart,
   formatResult,
   formatTracking,
   ladderPoints,
+  profileForMatch,
   QUEUE_NAMES,
   resolveQueueProfile,
   type QueueProfile,
+  type QueueRank,
 } from "./format";
 import type { Env, LeagueEntry, PlayerState, TrackerState } from "./types";
 
@@ -23,7 +26,8 @@ const MAX_MATCHES_PER_RUN = 2;
 interface Config {
   players: string[];
   announceGameStart: boolean;
-  queue: QueueProfile;
+  /** Every ladder being tracked, in config order. */
+  queues: QueueProfile[];
 }
 
 function readConfig(env: Env): Config {
@@ -40,15 +44,29 @@ function readConfig(env: Env): Config {
 
   // Both the default and the validation live here with the other config, not
   // in format.ts: a typo would otherwise track the wrong ladder indefinitely.
-  const queue = resolveQueueProfile(env.TRACK_QUEUE ?? "solo");
-  if (!queue) {
-    throw new Error(`TRACK_QUEUE is "${env.TRACK_QUEUE}" — expected one of: ${QUEUE_NAMES.join(", ")}`);
+  // Comma-separated list of ladders, or "all" for every one of them.
+  const names = (env.TRACK_QUEUE ?? "solo")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const queues: QueueProfile[] = [];
+  for (const name of names) {
+    const resolved = name.toLowerCase() === "all" ? ALL_QUEUE_PROFILES : [resolveQueueProfile(name)];
+    for (const profile of resolved) {
+      if (!profile) {
+        throw new Error(`TRACK_QUEUE contains "${name}" — expected "all" or a list of: ${QUEUE_NAMES.join(", ")}`);
+      }
+      if (!queues.some((q) => q.leagueQueueType === profile.leagueQueueType)) queues.push(profile);
+    }
+  }
+  if (!queues.length) {
+    throw new Error(`TRACK_QUEUE is empty — expected "all" or a list of: ${QUEUE_NAMES.join(", ")}`);
   }
 
   return {
     players,
     announceGameStart: env.ANNOUNCE_GAME_START !== "false",
-    queue,
+    queues,
   };
 }
 
@@ -66,7 +84,15 @@ async function loadState(env: Env): Promise<TrackerState> {
 
 async function ensurePlayer(riot: RiotClient, state: TrackerState, riotId: string): Promise<PlayerState> {
   const existing = state.players[riotId];
-  if (existing?.puuid) return existing;
+  if (existing?.puuid) {
+    // State written by the single-queue version of this worker carried one
+    // `ladder` number instead of the per-queue map. Which ladder it belonged
+    // to isn't recorded, so it can't be migrated — drop it and let the first
+    // game per queue skip its delta while a fresh baseline is taken.
+    existing.ladders ??= {};
+    delete (existing as { ladder?: unknown }).ladder;
+    return existing;
+  }
 
   const [gameName, tagLine] = riotId.split("#");
   if (!gameName || !tagLine) throw new Error(`PLAYERS entry "${riotId}" must look like Name#TAG`);
@@ -76,7 +102,7 @@ async function ensurePlayer(riot: RiotClient, state: TrackerState, riotId: strin
     puuid: account.puuid,
     displayName: `${account.gameName}#${account.tagLine}`,
     seen: [],
-    ladder: null,
+    ladders: {},
     inGame: false,
     bootstrapped: false,
   };
@@ -88,7 +114,21 @@ async function ensurePlayer(riot: RiotClient, state: TrackerState, riotId: strin
 type Send = (text: string) => Promise<void>;
 
 /** Memoised per player per cycle — see checkPlayer. */
-type EntryFetcher = () => Promise<LeagueEntry | null>;
+type EntriesFetcher = () => Promise<LeagueEntry[]>;
+
+function entryFor(entries: LeagueEntry[], queue: QueueProfile): LeagueEntry | null {
+  return entries.find((e) => e.queueType === queue.leagueQueueType) ?? null;
+}
+
+/** One rank per tracked ladder, for the messages that show them all. */
+function queueRanks(cfg: Config, entries: LeagueEntry[]): QueueRank[] {
+  return cfg.queues.map((q) => ({ label: q.label, entry: entryFor(entries, q) }));
+}
+
+/** Fresh LP baseline for every tracked ladder at once. */
+function ladderBaselines(cfg: Config, entries: LeagueEntry[]): Record<string, number | null> {
+  return Object.fromEntries(cfg.queues.map((q) => [q.leagueQueueType, ladderPoints(entryFor(entries, q))]));
+}
 
 /** Newest first, capped so the KV state document can't grow unbounded. */
 function markSeen(player: PlayerState, matchId: string): void {
@@ -104,16 +144,16 @@ async function bootstrapPlayer(
   player: PlayerState,
   ids: string[],
   send: Send,
-  getEntry: EntryFetcher,
+  getEntries: EntriesFetcher,
 ): Promise<void> {
-  const entry = await getEntry();
-  await send(formatTracking(player.displayName, entry, cfg.queue.label));
+  const entries = await getEntries();
+  await send(formatTracking(player.displayName, queueRanks(cfg, entries)));
   // Commit only once the message has actually landed. Marking the player
   // bootstrapped first would mean a transient Telegram failure silently
   // consumed the announcement with no retry -- the same reason `seen` in
   // announceMatches is updated after its send rather than before.
   player.seen = ids;
-  player.ladder = ladderPoints(entry);
+  player.ladders = ladderBaselines(cfg, entries);
   player.bootstrapped = true;
 }
 
@@ -123,15 +163,10 @@ async function announceMatches(
   player: PlayerState,
   fresh: string[],
   send: Send,
-  getEntry: EntryFetcher,
+  getEntries: EntriesFetcher,
 ): Promise<void> {
   const batch = fresh.slice(0, MAX_MATCHES_PER_RUN);
-  const entry = await getEntry();
-  const nowLadder = ladderPoints(entry);
-
-  // We only hold one rank snapshot, so a clean LP delta is only meaningful
-  // when exactly one game happened since the last check.
-  const delta = fresh.length === 1 && player.ladder !== null && nowLadder !== null ? nowLadder - player.ladder : null;
+  const entries = await getEntries();
 
   for (const matchId of batch) {
     const match = await riot.match(matchId);
@@ -148,34 +183,52 @@ async function announceMatches(
     const me = match.info.participants.find((p) => p.puuid === player.puuid);
     if (!me) continue;
 
+    // Each match reports LP from the ladder it was actually played on --
+    // Solo and Double Up ranks are independent, so the right entry and the
+    // right baseline both hang off the match's queue.
+    const queue = profileForMatch(cfg.queues, match.info) ?? null;
+    const entry = queue ? entryFor(entries, queue) : null;
+
+    // We only hold one rank snapshot per ladder, so a clean LP delta is only
+    // meaningful when exactly one game happened since the last check.
+    let lpDelta: number | null = null;
+    if (queue && fresh.length === 1) {
+      const nowLadder = ladderPoints(entry);
+      const before = player.ladders[queue.leagueQueueType];
+      if (nowLadder !== null && before !== null && before !== undefined) lpDelta = nowLadder - before;
+    }
+
     await send(
       formatResult({
         displayName: player.displayName,
         match,
         me,
         entry,
-        queue: cfg.queue,
-        lpDelta: delta,
+        queue,
+        lpDelta,
       }),
     );
     markSeen(player, matchId);
   }
 
-  // Only advance the LP baseline once the whole backlog has been announced,
+  // Only advance the LP baselines once the whole backlog has been announced,
   // so a deferred match still gets measured against the right starting point.
-  if (batch.length === fresh.length) player.ladder = nowLadder;
+  if (batch.length === fresh.length) player.ladders = ladderBaselines(cfg, entries);
   player.inGame = false;
 }
 
 async function announceLiveGame(
   riot: RiotClient,
+  cfg: Config,
   player: PlayerState,
   send: Send,
-  getEntry: EntryFetcher,
+  getEntries: EntriesFetcher,
 ): Promise<void> {
   const live = await riot.isInGame(player.puuid);
   if (live === true && !player.inGame) {
-    await send(formatGameStart(player.displayName, await getEntry()));
+    // The spectator payload doesn't say which queue was entered, so the ping
+    // shows the player's rank on every tracked ladder.
+    await send(formatGameStart(player.displayName, queueRanks(cfg, await getEntries())));
   }
   if (live !== null) player.inGame = live;
 }
@@ -192,24 +245,25 @@ async function checkPlayer(
 
   // A player who finishes a game and immediately requeues hits both the
   // match-result and game-start paths in one tick. Rank can't change between
-  // two awaits milliseconds apart, so fetch it at most once per player.
-  let cached: LeagueEntry | null | undefined;
-  const getEntry: EntryFetcher = async () => {
+  // two awaits milliseconds apart, so fetch it at most once per player. One
+  // response carries every ladder's entry, so tracking both queues is free.
+  let cached: LeagueEntry[] | undefined;
+  const getEntries: EntriesFetcher = async () => {
     if (cached === undefined) {
-      cached = await riot.rankedEntry(player.puuid, cfg.queue.leagueQueueType);
+      cached = await riot.rankedEntries(player.puuid);
     }
     return cached;
   };
 
   if (!player.bootstrapped) {
-    await bootstrapPlayer(cfg, player, ids, send, getEntry);
+    await bootstrapPlayer(cfg, player, ids, send, getEntries);
     return;
   }
 
   const fresh = ids.filter((id) => !player.seen.includes(id)).reverse();
-  if (fresh.length) await announceMatches(riot, cfg, player, fresh, send, getEntry);
+  if (fresh.length) await announceMatches(riot, cfg, player, fresh, send, getEntries);
 
-  if (cfg.announceGameStart) await announceLiveGame(riot, player, send, getEntry);
+  if (cfg.announceGameStart) await announceLiveGame(riot, cfg, player, send, getEntries);
 }
 
 /** How long to stop asking after the spectator endpoint refuses us. */

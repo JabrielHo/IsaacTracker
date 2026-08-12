@@ -174,7 +174,7 @@ export function queueName(info: MatchInfo): string {
 }
 
 /**
- * Which ladder to report. Solo and Double Up are separate ranks on separate
+ * One ladder to report. Solo and Double Up are separate ranks on separate
  * queues, so the league entry and the match ids have to be chosen together --
  * reading solo LP off a Double Up game would produce nonsense deltas.
  */
@@ -199,6 +199,8 @@ const PROFILES = {
 
 export const QUEUE_NAMES = Object.keys(PROFILES);
 
+export const ALL_QUEUE_PROFILES: QueueProfile[] = Object.values(PROFILES);
+
 /**
  * Returns undefined for anything unrecognised so the caller can reject it.
  * Silently falling back to solo would track the wrong ladder forever on a typo.
@@ -210,10 +212,11 @@ export function resolveQueueProfile(name: string): QueueProfile | undefined {
   return key in PROFILES ? PROFILES[key as keyof typeof PROFILES] : undefined;
 }
 
-/** True when this match belongs to the ladder we're tracking. */
-function isTrackedQueue(info: MatchInfo, profile: QueueProfile): boolean {
+/** The tracked ladder this match was played on, if any. */
+export function profileForMatch(profiles: QueueProfile[], info: MatchInfo): QueueProfile | undefined {
   const id = queueId(info);
-  return id !== undefined && profile.matchQueueIds.includes(id);
+  if (id === undefined) return undefined;
+  return profiles.find((p) => p.matchQueueIds.includes(id));
 }
 
 /**
@@ -340,16 +343,18 @@ export function formatResult(args: {
   displayName: string;
   match: Match;
   me: Participant;
+  /** Entry for the ladder this match was played on; null off the tracked ladders. */
   entry: LeagueEntry | null;
-  queue: QueueProfile;
+  /** The tracked ladder this match belongs to, or null for an untracked queue. */
+  queue: QueueProfile | null;
   lpDelta: number | null;
 }): string {
   const { displayName, match, me, entry, queue, lpDelta } = args;
   const info = match.info;
 
-  // Rank and LP only make sense on the tracked ladder; anything else gets the
+  // Rank and LP only make sense on a tracked ladder; anything else gets the
   // queue name as its second line instead.
-  const rankEntry = isTrackedQueue(info, queue) ? entry : null;
+  const rankEntry = queue ? entry : null;
 
   // In Double Up the pair's standing is the result; the raw 1-8 placement makes
   // the winner's partner look like they came 2nd.
@@ -363,13 +368,15 @@ export function formatResult(args: {
   const mate = partnerName(info, me);
   const withMate = mate ? ` + ${esc(mate)}` : "";
   let header = `${placement} — <b>${esc(displayName)}</b>${withMate}`;
-  if (rankEntry) {
+  if (queue && rankEntry) {
     let delta = "";
     if (lpDelta !== null) {
       const sign = lpDelta >= 0 ? "+" : "";
       delta = ` (${sign}${lpDelta} LP)`;
     }
-    header += `\n${esc(rankLabel(rankEntry))}${delta}`;
+    // Both ladders post into the same chat, so the rank line has to say which
+    // one it belongs to -- "Gold II 34 LP" alone is ambiguous across queues.
+    header += `\n${esc(queue.label)}: ${esc(rankLabel(rankEntry))}${delta}`;
   } else {
     header += `\n${esc(queueName(info))}`;
   }
@@ -395,11 +402,28 @@ export function formatResult(args: {
   return lines.join("\n");
 }
 
-export function formatGameStart(displayName: string, rankEntry: LeagueEntry | null): string {
-  const rank = rankEntry ? ` · ${rankLabel(rankEntry)}` : "";
-  return `🎮 <b>${esc(displayName)}</b> just queued into a game${esc(rank)}`;
+/** One rank per tracked ladder, in config order. */
+export interface QueueRank {
+  label: string;
+  entry: LeagueEntry | null;
 }
 
-export function formatTracking(displayName: string, entry: LeagueEntry | null, queueLabel: string): string {
-  return `👀 Now tracking <b>${esc(displayName)}</b> — ${esc(rankLabel(entry))} (${esc(queueLabel)})`;
+/**
+ * "Ranked: Gold II 34 LP · Double Up: Silver I 12 LP". With several ladders
+ * tracked, ladders the player has never touched are dropped rather than
+ * padding every message with "Unranked" -- but if they're unranked everywhere,
+ * say so once instead of rendering nothing.
+ */
+function rankSummary(ranks: QueueRank[]): string {
+  const ranked = ranks.filter((r) => r.entry !== null);
+  if (!ranked.length) return "Unranked";
+  return ranked.map((r) => `${r.label}: ${rankLabel(r.entry)}`).join(" · ");
+}
+
+export function formatGameStart(displayName: string, ranks: QueueRank[]): string {
+  return `🎮 <b>${esc(displayName)}</b> just queued into a game · ${esc(rankSummary(ranks))}`;
+}
+
+export function formatTracking(displayName: string, ranks: QueueRank[]): string {
+  return `👀 Now tracking <b>${esc(displayName)}</b> — ${esc(rankSummary(ranks))}`;
 }

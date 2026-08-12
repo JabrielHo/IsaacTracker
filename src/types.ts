@@ -8,7 +8,10 @@ export interface Env {
   RIOT_PLATFORM: string;
   PLAYERS: string;
   ANNOUNCE_GAME_START: string;
-  /** "solo" or "double_up" — which ranked ladder to report LP from. */
+  /**
+   * Which ranked ladders to report LP from: comma-separated "solo" and/or
+   * "double_up", or "all" for every ladder.
+   */
   TRACK_QUEUE: string;
 
   TRACKER: KVNamespace;
@@ -80,8 +83,12 @@ export interface PlayerState {
   displayName: string;
   /** Recently announced match ids, newest first. */
   seen: string[];
-  /** Flattened tier+division+LP, for computing deltas across promotions. */
-  ladder: number | null;
+  /**
+   * Flattened tier+division+LP per league queueType (RANKED_TFT etc.), for
+   * computing deltas across promotions. Solo and Double Up are independent
+   * ladders, so each needs its own baseline.
+   */
+  ladders: Record<string, number | null>;
   inGame: boolean;
   bootstrapped: boolean;
 }

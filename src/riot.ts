@@ -158,11 +158,14 @@ export class RiotClient {
     return match;
   }
 
-  /** @param queueType e.g. RANKED_TFT or RANKED_TFT_DOUBLE_UP -- separate ladders. */
-  async rankedEntry(puuid: string, queueType: string): Promise<LeagueEntry | null> {
+  /**
+   * Every ladder the player has an entry on (RANKED_TFT, RANKED_TFT_DOUBLE_UP,
+   * ...) in one request -- Riot returns them all together, so tracking several
+   * queues costs no more than tracking one. Callers pick theirs by queueType.
+   */
+  async rankedEntries(puuid: string): Promise<LeagueEntry[]> {
     const entries = await this.get<LeagueEntry[]>(this.platform, `/tft/league/v1/by-puuid/${puuid}`, true);
-    if (!Array.isArray(entries)) return null;
-    return entries.find((e) => e.queueType === queueType) ?? null;
+    return Array.isArray(entries) ? entries : [];
   }
 
   /**

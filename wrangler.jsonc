@@ -24,7 +24,7 @@
     "RIOT_PLATFORM": "sg2",
     "PLAYERS": "audioizzzaac#98k",
     "ANNOUNCE_GAME_START": "true",
-    "TRACK_QUEUE": "double_up"
+    "TRACK_QUEUE": "all"
   },
 
   "observability": {

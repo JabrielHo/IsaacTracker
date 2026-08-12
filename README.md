@@ -9,13 +9,17 @@ Tracking `audioizzzaac#98k` on Singapore (`sg2`) by default.
 
 ```
 🥇 1st of 4 teams — audioizzzaac#98K + jkyz49
-Master 251 LP (+34 LP)
+Double Up: Master 251 LP (+34 LP)
 🧩 2 N.O.V.A. · 1 Space Groove
 🎯 🟡★★Miss Fortune — Deathblade, Deathblade, Guinsoos Rageblade
     🟣★Urgot — Titans Resolve, Unstable Concoction, Quicksilver
     🟢★★Maokai — Frozen Heart, Dragons Claw
 📊 Lv 7 · stage 5-3 · 56 dmg · 29g left · 33:43
 ```
+
+Solo Ranked and Double Up are tracked at the same time; the rank line names the
+ladder the game was played on, and each ladder's LP delta is computed against its
+own baseline.
 
 The coloured dots are unit cost (⚪🟢🔵🟣🟡 for 1–5), matching the border
 colours op.gg uses.
@@ -160,25 +164,33 @@ still get measured against the right starting point.
 
 ## Solo vs Double Up
 
-`TRACK_QUEUE` in [wrangler.jsonc](wrangler.jsonc) picks which ladder LP is reported from:
+`TRACK_QUEUE` in [wrangler.jsonc](wrangler.jsonc) picks which ladders LP is reported
+from — a comma-separated list, or `"all"` for every one of them:
 
 | Value | League queue | Match queues |
 |---|---|---|
 | `"solo"` | `RANKED_TFT` | 1100 |
 | `"double_up"` | `RANKED_TFT_DOUBLE_UP` | 1160 |
+| `"all"` | both of the above | 1100, 1160 |
 
 These are completely separate ranks — someone can be Emerald in solo and Master in
-Double Up at the same time. Games outside the tracked queue still get posted, just with
-the queue name instead of a rank line.
+Double Up at the same time, which is why each tracked ladder keeps its own LP baseline
+and every result names the ladder it came from (`Double Up: Gold II 34 LP (+27 LP)`).
+Riot returns every ladder's entry in one league request, so tracking both costs no
+extra API calls. Games outside the tracked queues still get posted, just with the
+queue name instead of a rank line.
 
-Anything other than those two values is rejected at startup with an error naming the
-valid ones, rather than quietly falling back to solo — a typo here would otherwise
-track the wrong ladder indefinitely. `"double-up"` and `"Double Up"` also work;
+Anything else in the list is rejected at startup with an error naming the valid
+values, rather than quietly falling back to solo — a typo here would otherwise track
+the wrong ladder indefinitely. `"double-up"` and `"Double Up"` also work;
 `"doubleup"` does not.
 
-**Changing this requires resetting state.** The stored LP baseline belongs to the old
-ladder, so the first game after a switch would diff against the wrong number and report
-a nonsense delta. Clear it:
+**Narrowing the list doesn't need a reset** — each ladder's baseline is stored under
+its own key, so adding or removing a queue just starts (or stops) baselining that
+ladder; the first game on a newly added ladder skips its LP delta while a baseline is
+taken. State written by the old single-queue version of this worker is migrated by
+dropping its one ambiguous baseline the same way. If the stored baselines ever look
+wrong, clearing state is still available:
 
 ```bash
 npx wrangler kv key delete "state:v1" --binding TRACKER --remote
