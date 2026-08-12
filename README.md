@@ -12,8 +12,8 @@ Tracking `audioizzzaac#98k` on Singapore (`sg2`) by default.
 Master 251 LP (+34 LP)
 🧩 2 N.O.V.A. · 1 Space Groove
 🎯 🟡★★Miss Fortune — Deathblade, Deathblade, Guinsoos Rageblade
-    🟢★★Maokai — Frozen Heart, Dragons Claw
     🟣★Urgot — Titans Resolve, Unstable Concoction, Quicksilver
+    🟢★★Maokai — Frozen Heart, Dragons Claw
 📊 Lv 7 · stage 5-3 · 56 dmg · 29g left · 33:43
 ```
 

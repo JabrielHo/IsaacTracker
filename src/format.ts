@@ -304,14 +304,14 @@ function activeTraits(traits: Trait[] = []): string[] {
 const COST_DOT: Record<number, string> = { 0: "⚪", 1: "🟢", 2: "🔵", 4: "🟣", 6: "🟡" };
 
 /**
- * The whole final board with star levels, 3-stars first, then highest cost.
- * Itemized units get a line each; itemless ones are folded into a single
- * trailing line, which is what keeps a 9-unit board from taking 9 rows on a
- * phone.
+ * The whole final board, highest cost first, star level breaking ties — so the
+ * cost dots read as ordered bands the way op.gg's card does. Itemized units get
+ * a line each; itemless ones are folded into a single trailing line, which is
+ * what keeps a 9-unit board from taking 9 rows on a phone.
  */
 function boardLines(units: Unit[] = []): string[] {
   const named = [...units]
-    .sort((a, b) => b.tier - a.tier || b.rarity - a.rarity)
+    .sort((a, b) => b.rarity - a.rarity || b.tier - a.tier)
     .map((u) => ({
       // Star level on every unit, like op.gg -- text stars, not the ⭐ emoji,
       // which at three-per-unit would swallow the names around it.
