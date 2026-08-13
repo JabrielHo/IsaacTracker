@@ -126,15 +126,15 @@ const stripSet = (id = ""): string => splitCamel(id.replace(/^TFT\d*[a-z]*_/i, "
  * with optional qualifiers. One tokenizing pass handles every shape, so each
  * rule is stated exactly once instead of once per id variant:
  *
- *   TFT_Item_InfinityEdge                  -> "Infinity Edge"
- *   TFT9_Item_OrnnHorizonFocus             -> "Ornn Horizon Focus"
- *   TFT17_Item_RangedTraitEmblemItem       -> "Sniper Emblem"
- *   TFT17_AnimaSquad_Item_Tier2_UwuBlaster -> "Uwu Blaster (T2)"
+ *   TFT_Item_InfinityEdge                    -> "Infinity Edge"
+ *   TFT9_Item_OrnnHorizonFocus               -> "Ornn Horizon Focus"
+ *   TFT17_Item_RangedTraitEmblemItem         -> "Sniper Emblem"
+ *   TFT17_AnimaSquadItem_Tier2_LionessLament -> "Lioness Lament (T2)"
  *
  * Emblems embed the trait's dev name, which only the trait table can translate
- * ("Sniper Emblem", not "Ranged Trait Emblem"). The mechanic segment before the
- * marker ("AnimaSquad") is dropped — the unit holding the item already implies
- * it — while the upgrade tier is real information and kept, compressed.
+ * ("Sniper Emblem", not "Ranged Trait Emblem"). The set-mechanic segment is
+ * dropped — the unit holding the item already implies it — while the upgrade
+ * tier is real information and kept, compressed.
  */
 function itemName(id: string): string {
   const tokens = id.split("_");
@@ -142,7 +142,12 @@ function itemName(id: string): string {
   let set = "";
   if (/^TFT\d*[a-z]*$/i.test(tokens[0] ?? "")) set = tokens.shift() ?? "";
 
-  const marker = tokens.indexOf("Item");
+  // The marker segment ends in "Item": usually it is exactly that, but a set
+  // mechanic gets glued onto it ("AnimaSquadItem"), which is why matching the
+  // bare token isn't enough. Everything up to and including the marker is
+  // provenance rather than name. The final segment is never the marker -- it is
+  // the name, and emblems legitimately end in "EmblemItem".
+  const marker = tokens.findIndex((t, i) => i < tokens.length - 1 && /Item$/i.test(t));
   if (marker >= 0) tokens.splice(0, marker + 1);
 
   let tier = "";
@@ -279,10 +284,12 @@ function activeTraits(traits: Trait[] = []): string[] {
 const COST_DOT: Record<number, string> = { 0: "⚪", 1: "🟢", 2: "🔵", 4: "🟣", 6: "🟡" };
 
 /**
- * The whole final board, highest cost first, star level breaking ties — so the
- * cost dots read as ordered bands the way op.gg's card does. Itemized units get
- * a line each; itemless ones are folded into a single trailing line, which is
- * what keeps a 9-unit board from taking 9 rows on a phone.
+ * The whole final board, highest cost first, star level breaking ties -- so the
+ * cost dots read as ordered bands. Itemized units get a line each; a *run* of
+ * consecutive itemless ones folds into one line, which keeps a 9-unit board off
+ * 9 rows on a phone without letting the fold reorder anything. Folding every
+ * itemless unit into one trailing line instead would drop a bare 5-cost below
+ * an itemized 4-cost, and then the dots no longer descend.
  */
 function boardLines(units: Unit[] = []): string[] {
   const named = [...units]
@@ -293,9 +300,24 @@ function boardLines(units: Unit[] = []): string[] {
       name: `${COST_DOT[u.rarity] ?? ""}${"★".repeat(u.tier)}${stripSet(u.character_id)}`,
       items: (u.itemNames ?? []).filter(isRealItem).map(itemName),
     }));
-  const lines = named.filter((n) => n.items.length).map((n) => `${n.name} — ${n.items.join(", ")}`);
-  const bare = named.filter((n) => !n.items.length).map((n) => n.name);
-  if (bare.length) lines.push(bare.join(" · "));
+
+  const lines: string[] = [];
+  let run: string[] = [];
+  const flush = (): void => {
+    if (run.length) lines.push(run.join(" · "));
+    run = [];
+  };
+
+  for (const u of named) {
+    if (!u.items.length) {
+      run.push(u.name);
+      continue;
+    }
+    flush();
+    lines.push(`${u.name} — ${u.items.join(", ")}`);
+  }
+  flush();
+
   return lines;
 }
 
